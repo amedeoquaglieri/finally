@@ -5,12 +5,21 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
+def normalize_ticker(ticker: str) -> str:
+    """Canonical form for ticker symbols: stripped and uppercased ("  aapl " -> "AAPL")."""
+    return ticker.strip().upper()
+
+
 class MarketDataSource(ABC):
     """Contract for market data providers.
 
     Implementations push price updates into a shared PriceCache on their own
     schedule. Downstream code never calls the data source directly for prices —
     it reads from the cache.
+
+    All implementations normalize tickers with normalize_ticker() in start(),
+    add_ticker() and remove_ticker(), so "aapl" and "AAPL" are the same ticker
+    regardless of which source is active.
 
     Lifecycle:
         source = create_market_data_source(cache)

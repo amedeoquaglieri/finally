@@ -1,5 +1,7 @@
 """Tests for PriceCache."""
 
+import threading
+
 from app.market.cache import PriceCache
 
 
@@ -101,3 +103,68 @@ class TestPriceCache:
         cache = PriceCache()
         update = cache.update("AAPL", 190.12345)
         assert update.price == 190.12
+
+    def test_remove_bumps_version(self):
+        """Test that removing a present ticker bumps the version (so SSE sends it)."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        v = cache.version
+        cache.remove("AAPL")
+        assert cache.version == v + 1
+
+    def test_remove_nonexistent_keeps_version(self):
+        """Test that removing an unknown ticker does not bump the version."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        v = cache.version
+        cache.remove("GOOGL")
+        assert cache.version == v
+
+    def test_zero_timestamp_is_kept(self):
+        """Test that timestamp=0.0 is used as given, not replaced by now."""
+        cache = PriceCache()
+        update = cache.update("AAPL", 190.00, timestamp=0.0)
+        assert update.timestamp == 0.0
+
+    def test_previous_close_defaults_to_first_price(self):
+        """Test that the daily-change reference defaults to the first price seen."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        update = cache.update("AAPL", 195.00)
+        assert update.previous_close == 190.00
+        assert update.day_change == 5.00
+
+    def test_previous_close_is_kept_across_updates(self):
+        """Test that an explicit previous_close persists when later updates omit it."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00, previous_close=180.00)
+        update = cache.update("AAPL", 191.00)
+        assert update.previous_close == 180.00
+
+    def test_previous_close_can_be_replaced(self):
+        """Test that a new previous_close (e.g. a new trading day) replaces the old one."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00, previous_close=180.00)
+        update = cache.update("AAPL", 191.00, previous_close=189.00)
+        assert update.previous_close == 189.00
+
+    def test_concurrent_writers(self):
+        """Test that concurrent writers from many threads lose no updates."""
+        cache = PriceCache()
+        tickers = [f"T{i}" for i in range(8)]
+        updates_per_thread = 500
+
+        def writer(ticker: str) -> None:
+            for n in range(updates_per_thread):
+                cache.update(ticker, 100.0 + n)
+                cache.get_all()
+
+        threads = [threading.Thread(target=writer, args=(t,)) for t in tickers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert cache.version == len(tickers) * updates_per_thread
+        assert len(cache) == len(tickers)
+        assert all(cache.get_price(t) == 100.0 + updates_per_thread - 1 for t in tickers)

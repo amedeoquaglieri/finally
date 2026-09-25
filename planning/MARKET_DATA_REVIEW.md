@@ -4,6 +4,8 @@
 **Scope:** `backend/app/market/` (8 modules), `backend/tests/` (6 test modules plus `conftest.py`), `backend/pyproject.toml`, `backend/README.md`, `backend/CLAUDE.md`, `backend/market_data_demo.py`, and the market data docs in `planning/` and `planning/archive/`.
 **Previous review:** `planning/archive/MARKET_DATA_REVIEW.md` (2026-02-10). Section 7 shows which of its items were fixed.
 
+> **Update 2026-09-25:** **All findings are resolved**, including a second critical Massive bug (C2) that turned up during the fix work. The backend now has 120 tests at 99% coverage. See section 10 for the resolution log; sections 1–9 are kept as the original review.
+
 ---
 
 ## 1. Executive Summary
@@ -126,6 +128,16 @@ ts_ns = (trade.sip_timestamp if trade else None) or snap.updated
 timestamp = ts_ns / 1e9 if ts_ns else None
 ```
 Also, build test fixtures with `TickerSnapshot.from_dict({...})` (or `MagicMock(spec=TickerSnapshot)`) so attribute typos fail the tests.
+
+### C2 — Critical (found 2026-09-25 while fixing C1): Massive requests go to the wrong URL
+
+`massive_client.py` called `get_snapshot_all(market_type=SnapshotMarketType.STOCKS, ...)`, as the SDK's type hints and the planning docs suggest. In `massive` 2.2.0, `SnapshotMarketType` is a plain `Enum` (not a `str` enum), and the SDK:
+- builds the URL with `f"/v2/snapshot/locale/{locale}/markets/{market_type}/tickers"`, which formats the member as `SnapshotMarketType.STOCKS`;
+- picks the locale with `market_type == "stocks"`, which is `False` for the member, so the locale becomes `global`.
+
+The request therefore went to `/v2/snapshot/locale/global/markets/SnapshotMarketType.STOCKS/tickers`, so **even with C1 fixed, every poll would fail** against the real API. This only showed up once the real SDK was driven over HTTP against a local fake API: every mock-based test had passed.
+
+**Fix:** pass `SnapshotMarketType.STOCKS.value` (the string `"stocks"`). The test suite now includes an HTTP-level test that fails on the wrong path.
 
 ### M1 — Medium: ticker removals are never sent to connected SSE clients
 
@@ -273,3 +285,63 @@ With `dt` sized to real trading time, per-tick moves are about 0.006% (about 1¢
 ## 9. Conclusion
 
 The market data backend is a solid foundation. The architecture is clean, the simulator is mathematically sound, and the default (no-API-key) path works end to end, so it is ready for the portfolio, watchlist and SSE frontend work. **The real-data path is not.** A wrong attribute name, hidden by permissive mocks, means Massive mode would show no prices at all. That fix and the three integration fixes (M1-M3) are each only a few lines and should be done before the next agent builds on this layer.
+
+---
+
+## 10. Resolution Log
+
+**2026-09-25: all findings resolved.** Work is on branch `market-data-backend-fixes`.
+
+Final state: **120 tests pass** on Python 3.12 (now pinned) and 3.14, 10 of 10 repeat runs, with no warnings. Coverage is **99%**: every module is at 100% except `simulator.py` at 99%. `ruff check` and `ruff format --check` are clean.
+
+End-to-end checks beyond the test suite:
+- **Simulator:** SSE under uvicorn, including the new daily-change fields and a ticker removal reaching a connected client.
+- **Massive:** real SDK over HTTP against a local fake API. `start()` returned in 2 ms while the API took 300 ms; the request went to `/v2/snapshot/locale/us/markets/stocks/tickers` with normalized tickers and the Bearer key; prices, previous close, daily change and nanosecond timestamps were parsed correctly.
+- **Demo:** `market_data_demo.py` runs.
+
+### Critical
+
+| Item | Fix | Tests |
+|---|---|---|
+| **C1** | `_extract_price()` reads `last_trade.sip_timestamp` (falling back to `snap.updated`), converting nanoseconds to seconds (÷1e9). Price falls back to `day.close` when there is no last trade; a missing or zero price is skipped with a warning | Snapshots are built with the real `TickerSnapshot.from_dict()`. Tests cover a full API-shaped payload, the `day.close` fallback, a zeroed day bar, a missing timestamp and a non-numeric price. 8 of these tests fail against the old code |
+| **C2** | Pass `SnapshotMarketType.STOCKS.value` to the SDK | `TestMassiveOverHTTP` drives the real SDK against a local HTTP server that only answers the correct path; it fails with the enum member |
+
+### Medium
+
+| Item | Fix | Tests |
+|---|---|---|
+| **M1** | `PriceCache.remove()` bumps `version` when a ticker was present; SSE sends a snapshot even when empty (`data: {}`). Documented that events are full snapshots to be replaced, not merged | Version bump on removal (and none for an unknown ticker); SSE removal event and empty snapshot. Verified live |
+| **M2** | `APIRouter` is created inside `create_stream_router()` | Two calls give independent routers, and the app's route is bound to the right cache |
+| **M3** | `normalize_ticker()` (strip + uppercase) in `interface.py`, exported from `app.market`, used by both sources in `start` (with de-duplication), `add_ticker` and `remove_ticker` | Normalization tests for both sources |
+| **M4** | `PriceUpdate.previous_close` plus `day_change` and `day_change_percent`, included in `to_dict()`/SSE. Massive uses `prevDay.c`. The simulator uses the price when the ticker was first added this session. `PriceCache.update(previous_close=...)` keeps the reference across updates that omit it | Model, cache, simulator and Massive tests, including the reference surviving remove + re-add |
+| **M5** | `start()` only creates the task, and the loop polls first then sleeps, so startup does no network I/O. `RESTClient` gets 5 s timeouts and `retries=0` (the loop retries every interval) | `start()` returns in < 0.25 s against a 0.5 s API; client constructor arguments are asserted |
+
+### Low
+
+| Item | Fix |
+|---|---|
+| **L1** | `GBMSimulator` remembers removed tickers' last prices and resumes them on re-add (also for random-priced unknown tickers). Guidance to keep tracking held tickers was added to `backend/CLAUDE.md` and the design doc (§11) |
+| **L2** | Both sources keep tickers added before `start()` and merge them into the start list. In the simulator, `remove_ticker` before `start()` also works |
+| **L3** | The SSE generator re-raises `CancelledError`, and sends a `: keepalive` comment after 15 s idle (tested; a mutation check confirms the cancellation test fails if the `raise` is removed) |
+| **L4** | Worker thread gets a copy of the ticker list; a duplicate `add_ticker` writes nothing to the cache; `timestamp=0.0` is honoured (`is None` check); `version` is read under the lock; the simulator takes a `seed` and uses one `numpy` Generator for all randomness |
+| **L5** | README install/test commands fixed (`--extra dev`); `rich` moved to the dev extra (`uv.lock` updated); the summary and design docs were brought up to date, including the event rate (one per ticker per ~500 s, ~50 s across 10 tickers) and SDK usage |
+| **L6** | `backend/.python-version` pins 3.12 to match the Docker image |
+
+### Tests
+
+| Item | Fix |
+|---|---|
+| **T1** | Real SDK models in all Massive tests, plus the HTTP-level test |
+| **T2** | New `test_stream.py` (12 tests): `stream.py` coverage went from 33% to 100% |
+| **T3** | `test_exception_resilience` injects two failing steps and checks prices keep flowing |
+| **T4** | `test_custom_event_probability` asserts a 2–5% move per tick; the GBM tests check shock size over 200 steps |
+| **T5** | Rounding checked with `p == round(p, 2)` over 100 steps |
+| **T6** | Fixed sleeps replaced with `tests.helpers.wait_until()` polling |
+| **T7** | Added: all 10 default tickers, GBM volatility and correlation statistics over 20,000 seeded steps, 8-thread concurrent cache writers, remove + re-add, seeding reproducibility |
+| **T8** | Removed the deprecated `event_loop_policy` fixture (`conftest.py`); the 73 deprecation warnings are gone |
+| **T9** | `ruff format` applied to all tests |
+
+### Not changed
+
+- **Simulator realism (§6):** left as designed. The design doc's §13 now describes the `dt` knob for a livelier demo.
+- **Downstream integration:** keeping held tickers tracked, and returning a 400 on a price cache miss, belong to the watchlist/portfolio routes that aren't built yet. The contract is documented in `backend/CLAUDE.md`.
