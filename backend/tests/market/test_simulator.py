@@ -1,6 +1,11 @@
 """Tests for GBMSimulator."""
 
-from app.market.seed_prices import SEED_PRICES
+import math
+
+import numpy as np
+import pytest
+
+from app.market.seed_prices import SEED_PRICES, TICKER_PARAMS
 from app.market.simulator import GBMSimulator
 
 
@@ -122,10 +127,83 @@ class TestGBMSimulator:
 
     def test_prices_rounded_to_two_decimals(self):
         """Test that prices are rounded to 2 decimal places."""
-        sim = GBMSimulator(tickers=["AAPL"])
-        result = sim.step()
-        price_str = str(result["AAPL"])
-        # Check that we have at most 2 decimal places
-        if '.' in price_str:
-            decimal_part = price_str.split('.')[1]
-            assert len(decimal_part) <= 2
+        sim = GBMSimulator(tickers=["AAPL", "TSLA"], seed=1)
+        for _ in range(100):
+            for price in sim.step().values():
+                assert price == round(price, 2)
+
+    def test_seed_makes_paths_reproducible(self):
+        """Test that the same seed gives the same prices, including random seed prices."""
+        tickers = ["AAPL", "GOOGL", "ZZZZ"]
+        sim1 = GBMSimulator(tickers=tickers, seed=123, event_probability=0.5)
+        sim2 = GBMSimulator(tickers=tickers, seed=123, event_probability=0.5)
+        assert sim1.get_price("ZZZZ") == sim2.get_price("ZZZZ")
+        for _ in range(50):
+            assert sim1.step() == sim2.step()
+
+    def test_all_default_tickers(self):
+        """Test that the full default watchlist builds a valid correlation matrix."""
+        sim = GBMSimulator(tickers=list(SEED_PRICES), seed=0)
+        assert sim._cholesky is not None
+        assert sim._cholesky.shape == (10, 10)
+        assert set(sim.step()) == set(SEED_PRICES)
+
+    def test_log_returns_match_gbm_parameters(self):
+        """Test that per-step log-returns have the configured volatility and correlations."""
+        n_steps = 20_000
+        tickers = ["AAPL", "GOOGL", "TSLA"]
+        sim = GBMSimulator(tickers=tickers, seed=42, event_probability=0.0)
+
+        log_returns = np.empty((n_steps, len(tickers)))
+        prev = np.array([sim.get_price(t) for t in tickers])
+        for i in range(n_steps):
+            sim.step()
+            cur = np.array([sim.get_price(t) for t in tickers])
+            log_returns[i] = np.log(cur / prev)
+            prev = cur
+
+        dt = GBMSimulator.DEFAULT_DT
+        for j, ticker in enumerate(tickers):
+            sigma = TICKER_PARAMS[ticker]["sigma"]
+            expected_std = sigma * math.sqrt(dt)
+            assert log_returns[:, j].std() == pytest.approx(expected_std, rel=0.05)
+            # Drift is negligible per tick; the mean is ~0 within sampling error
+            assert abs(log_returns[:, j].mean()) < 5 * expected_std / math.sqrt(n_steps)
+
+        corr = np.corrcoef(log_returns.T)
+        assert corr[0, 1] == pytest.approx(0.6, abs=0.05)  # AAPL-GOOGL: tech
+        assert corr[0, 2] == pytest.approx(0.3, abs=0.05)  # AAPL-TSLA
+
+    def test_events_move_price_by_2_to_5_percent(self):
+        """Test that a random event moves the price by 2-5% (always firing here)."""
+        sim = GBMSimulator(tickers=["AAPL"], seed=7, event_probability=1.0)
+        for _ in range(200):
+            before = sim.get_price("AAPL")
+            sim.step()
+            move = abs(sim.get_price("AAPL") / before - 1)
+            assert 0.019 < move < 0.051  # 2-5% shock plus a tiny GBM move
+
+    def test_readding_ticker_resumes_last_price(self):
+        """Test that remove + re-add resumes the last price instead of resetting to seed."""
+        sim = GBMSimulator(tickers=["AAPL", "ZZZZ"], seed=3)
+        sim._prices["AAPL"] = 250.0
+        zzzz = sim.get_price("ZZZZ")
+
+        sim.remove_ticker("AAPL")
+        sim.remove_ticker("ZZZZ")
+        sim.add_ticker("AAPL")
+        sim.add_ticker("ZZZZ")
+
+        assert sim.get_price("AAPL") == 250.0
+        assert sim.get_price("ZZZZ") == zzzz
+
+    def test_open_price_is_first_price_of_session(self):
+        """Test that the daily-change reference is the first price, and survives re-adding."""
+        sim = GBMSimulator(tickers=["AAPL"], seed=5)
+        assert sim.get_open_price("AAPL") == SEED_PRICES["AAPL"]
+        for _ in range(100):
+            sim.step()
+        sim.remove_ticker("AAPL")
+        sim.add_ticker("AAPL")
+        assert sim.get_open_price("AAPL") == SEED_PRICES["AAPL"]
+        assert sim.get_open_price("NOPE") is None

@@ -8,7 +8,7 @@ FastAPI backend for the FinAlly AI Trading Workstation.
   - `market/` - Market data subsystem
     - `models.py` - PriceUpdate dataclass
     - `cache.py` - Thread-safe price cache
-    - `interface.py` - MarketDataSource abstract interface
+    - `interface.py` - MarketDataSource abstract interface and `normalize_ticker()`
     - `simulator.py` - GBM-based market simulator
     - `massive_client.py` - Massive/Polygon.io API client
     - `factory.py` - Data source factory
@@ -17,24 +17,32 @@ FastAPI backend for the FinAlly AI Trading Workstation.
 
 - `tests/` - Unit and integration tests
   - `market/` - Market data tests
+  - `helpers.py` - Shared test helpers
+
+## Setup
+
+Python 3.12 is pinned in `.python-version` (matching the Docker image); `uv` downloads it if needed.
+Dev tools (pytest, ruff, rich for the demo) are an optional extra, so pass `--extra dev`.
+Plain `uv sync --dev` does **not** install them — it would remove them.
+
+```bash
+uv sync --extra dev
+```
 
 ## Running Tests
 
 ```bash
-# Install dependencies
-uv sync --dev
-
 # Run all tests
-uv run pytest
+uv run --extra dev pytest
 
 # Run with coverage
-uv run pytest --cov=app --cov-report=html
+uv run --extra dev pytest --cov=app --cov-report=html
 
 # Run specific test file
-uv run pytest tests/market/test_simulator.py
+uv run --extra dev pytest tests/market/test_simulator.py
 
 # Run with verbose output
-uv run pytest -v
+uv run --extra dev pytest -v
 ```
 
 ## Environment Variables
@@ -44,12 +52,12 @@ uv run pytest -v
 ## Development
 
 ```bash
-# Install dependencies
-uv sync --dev
-
 # Run linter
-uv run ruff check .
+uv run --extra dev ruff check .
 
 # Format code
-uv run ruff format .
+uv run --extra dev ruff format .
+
+# Live terminal demo of the simulator
+uv run --extra dev market_data_demo.py
 ```
