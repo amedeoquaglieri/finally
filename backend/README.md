@@ -22,27 +22,27 @@ FastAPI backend for the FinAlly AI Trading Workstation.
 ## Setup
 
 Python 3.12 is pinned in `.python-version` (matching the Docker image); `uv` downloads it if needed.
-Dev tools (pytest, ruff, rich for the demo) are an optional extra, so pass `--extra dev`.
-Plain `uv sync --dev` does **not** install them — it would remove them.
+Dev tools (pytest, ruff, rich for the demo) are a `dev` dependency group, which `uv sync` and
+`uv run` install by default. Use `uv sync --no-dev` for a production install without them.
 
 ```bash
-uv sync --extra dev
+uv sync
 ```
 
 ## Running Tests
 
 ```bash
 # Run all tests
-uv run --extra dev pytest
+uv run pytest
 
 # Run with coverage
-uv run --extra dev pytest --cov=app --cov-report=html
+uv run pytest --cov=app --cov-report=html
 
 # Run specific test file
-uv run --extra dev pytest tests/market/test_simulator.py
+uv run pytest tests/market/test_simulator.py
 
 # Run with verbose output
-uv run --extra dev pytest -v
+uv run pytest -v
 ```
 
 ## Environment Variables
@@ -53,11 +53,11 @@ uv run --extra dev pytest -v
 
 ```bash
 # Run linter
-uv run --extra dev ruff check .
+uv run ruff check .
 
 # Format code
-uv run --extra dev ruff format .
+uv run ruff format .
 
 # Live terminal demo of the simulator
-uv run --extra dev market_data_demo.py
+uv run market_data_demo.py
 ```

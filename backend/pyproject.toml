@@ -11,7 +11,9 @@ dependencies = [
     "massive>=1.0.0",
 ]
 
-[project.optional-dependencies]
+# Dev tools: installed by default by `uv sync` / `uv run`; excluded with `--no-dev`
+# (e.g. in the production Docker image)
+[dependency-groups]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",

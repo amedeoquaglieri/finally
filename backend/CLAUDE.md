@@ -4,10 +4,10 @@
 
 ```bash
 cd backend
-uv sync --extra dev   # Install all dependencies including test/lint tools (not `--dev`)
+uv sync   # Install all dependencies, including the `dev` group (test/lint tools, rich for the demo)
 ```
 
-Python 3.12 is pinned in `.python-version`, matching the Docker image.
+Python 3.12 is pinned in `.python-version`, matching the Docker image. Dev tools are a `dev` dependency group, installed by default; the production image should use `uv sync --no-dev`.
 
 ## Market Data API
 
@@ -61,9 +61,9 @@ Default tickers: AAPL, GOOGL, MSFT, AMZN, TSLA, NVDA, META, JPM, V, NFLX. Seed p
 ## Running Tests
 
 ```bash
-uv run --extra dev pytest -v              # All tests
-uv run --extra dev pytest --cov=app       # With coverage
-uv run --extra dev ruff check app/ tests/ # Lint
+uv run pytest -v              # All tests
+uv run pytest --cov=app       # With coverage
+uv run ruff check app/ tests/ # Lint
 ```
 
 Massive tests use real SDK model objects (`TickerSnapshot.from_dict`) and one test drives the real SDK over HTTP against a local fake API — don't replace these with `MagicMock` snapshots, which hide attribute and URL bugs. Use `tests.helpers.wait_until` instead of fixed sleeps in async tests.
@@ -71,5 +71,5 @@ Massive tests use real SDK model objects (`TickerSnapshot.from_dict`) and one te
 ## Demo
 
 ```bash
-uv run --extra dev market_data_demo.py   # Live terminal dashboard with simulated prices
+uv run market_data_demo.py   # Live terminal dashboard with simulated prices
 ```

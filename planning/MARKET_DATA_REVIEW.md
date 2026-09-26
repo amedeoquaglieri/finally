@@ -324,7 +324,7 @@ End-to-end checks beyond the test suite:
 | **L2** | Both sources keep tickers added before `start()` and merge them into the start list. In the simulator, `remove_ticker` before `start()` also works |
 | **L3** | The SSE generator re-raises `CancelledError`, and sends a `: keepalive` comment after 15 s idle (tested; a mutation check confirms the cancellation test fails if the `raise` is removed) |
 | **L4** | Worker thread gets a copy of the ticker list; a duplicate `add_ticker` writes nothing to the cache; `timestamp=0.0` is honoured (`is None` check); `version` is read under the lock; the simulator takes a `seed` and uses one `numpy` Generator for all randomness |
-| **L5** | README install/test commands fixed (`--extra dev`); `rich` moved to the dev extra (`uv.lock` updated); the summary and design docs were brought up to date, including the event rate (one per ticker per ~500 s, ~50 s across 10 tickers) and SDK usage |
+| **L5** | Dev tools (including `rich`, now out of the runtime dependencies) moved to a `[dependency-groups] dev` group, which `uv sync`/`uv run` install by default and `uv sync --no-dev` excludes. So plain `uv sync`, `uv run pytest` and `uv run market_data_demo.py` work, and README commands are simplified accordingly (`uv.lock` updated); the summary and design docs were brought up to date, including the event rate (one per ticker per ~500 s, ~50 s across 10 tickers) and SDK usage |
 | **L6** | `backend/.python-version` pins 3.12 to match the Docker image |
 
 ### Tests

@@ -72,7 +72,7 @@ A Rich terminal demo is available at `backend/market_data_demo.py`:
 
 ```bash
 cd backend
-uv run --extra dev market_data_demo.py
+uv run market_data_demo.py
 ```
 
 Displays a live-updating dashboard with all 10 tickers, sparklines, color-coded direction arrows, and an event log for notable price moves. Runs 60 seconds or until Ctrl+C.
