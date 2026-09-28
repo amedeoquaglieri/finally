@@ -1,0 +1,34 @@
+# Only frontend/ and backend/ are copied into the image; keep the build context small
+# and free of local state and secrets.
+
+.git
+.github
+.claude
+planning
+scripts
+test
+db
+**/.env
+**/.env.*
+
+# Node
+**/node_modules
+**/.next
+frontend/out
+
+# Python
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/htmlcov
+backend/static
+backend/tests
+
+# SQLite files anywhere
+**/*.db
+**/*.db-wal
+**/*.db-shm

@@ -1,0 +1,51 @@
+# End-to-end test stack: the FinAlly app (mocked LLM, fresh DB) + a Playwright runner.
+#
+#   docker compose -f test/docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from playwright
+#   docker compose -f test/docker-compose.test.yml down -v
+#
+# Reports land in test/playwright-report/ and test/test-results/.
+name: finally-e2e
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      LLM_MOCK: "true"
+      # Force the simulator and never call a real LLM, whatever the developer's .env says.
+      MASSIVE_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+    # No volume: the SQLite DB lives in the container, so every run starts fresh.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    networks:
+      default:
+        # Chromium HSTS-preloads the whole `.app` TLD, so it upgrades http://app:8000 to https and
+        # fails. The browser uses this alias instead.
+        aliases: [finally-app]
+
+  playwright:
+    # Keep the tag in sync with @playwright/test in test/package.json.
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      BASE_URL: http://finally-app:8000
+      CI: "true"
+    working_dir: /e2e
+    volumes:
+      - ./:/e2e
+      # Container-local node_modules so the host's install is left alone.
+      - /e2e/node_modules
+    ipc: host
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npx playwright test"]
